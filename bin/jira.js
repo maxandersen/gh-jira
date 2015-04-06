@@ -46,6 +46,9 @@ Jira.DETAILS = {
     options: {
         'assign': Boolean,
         'assignee': String,
+        'unassign': Boolean,
+        'unassigned': Boolean,
+        'default-assignee': Boolean,
         'browser': Boolean,
         'comment': String,
         'component': String,
@@ -211,33 +214,24 @@ Jira.prototype.run = function() {
 
     operations = [
         function(callback) {
-            // Some users may have unencrypted passwords, forces login to store
-            // it encrypted.
-            try {
-                jiraConfig.password = instance.decryptText_(jiraConfig.password);
-            }
-            catch(e) {
-                logger.warn('Can\'t hash jira password.');
-                jiraConfig.password = null;
-            }
+            if (!jiraConfig.host || !jiraConfig.user || !jiraConfig.password) {
+                logger.warn('Jira plugin not configured.');
 
-            if (jiraConfig.user && jiraConfig.password) {
-                callback();
-            }
-            else {
                 instance.login_(function() {
                     logger.log('Writing GH config data.');
                     callback();
                 });
-            }
-        },
-        function(callback) {
-            if (!jiraConfig.host) {
-                logger.error('Jira plugin not configured.');
-                callback();
+
                 return;
             }
 
+            // Some users may have unencrypted passwords, forces login to store
+            // it encrypted.
+            jiraConfig.password = instance.decryptText_(jiraConfig.password);
+
+            callback();
+        },
+        function(callback) {
             instance.api = new jira.JiraApi(
                 jiraConfig.protocol, jiraConfig.host, jiraConfig.port,
                 jiraConfig.user, jiraConfig.password, jiraConfig.api_version);
@@ -306,6 +300,19 @@ Jira.prototype.run = function() {
             });
         }
 
+        if (options.unassign) {
+            options.assign = true;
+            options.unassigned = true;
+        }
+
+        if (options['default-assignee']) {
+            delete options.assignee;
+        }
+
+        if (options.unassigned) {
+            options.assignee = null;
+        }
+
         if (options.new) {
             if (options.project) {
                 logger.logTemplate(
@@ -365,10 +372,16 @@ Jira.prototype.run = function() {
 
                 switch (response.statusCode) {
                     case 204:
-                       logger.log('Issue assigned to ' + options.assignee);
-                       logger.logTemplate('{{jiraIssueLink}}', {
-                            options: options
-                        });
+                        if (options.assignee) {
+                            logger.log('Issue assigned to ' + options.assignee);
+                        }
+                        else {
+                            logger.log('Issue unassigned.');
+                        }
+
+                        logger.log(logger.logTemplate('{{jiraIssueLink}}', {
+                                options: options
+                            }));
                        break;
                     case 400:
                         logger.error('There is a problem with the received user representation.');
@@ -568,11 +581,12 @@ Jira.prototype.expandAliases_ = function(options) {
 Jira.prototype.expandComment_ = function(comment) {
     var instance = this;
 
-    return '{markdown}' + comment + instance.expandEmoji_(config.signature) + '{markdown}';
+    return comment + instance.expandEmoji_(config.signature);
 };
 
 Jira.prototype.expandEmoji_ = function(content) {
-    return content.replace(':octocat:', '![NodeGH](http://nodegh.io/images/octocat.png)');
+    return content.replace('<br><br>:octocat:', '\n\n\\\\\n\n!http://nodegh.io/images/octocat.png!')
+        .replace('*Sent from [GH](http://nodegh.io).*', '_Sent from [GH|http://nodegh.io/]_');
 };
 
 Jira.prototype.expandTransitionFields_ = function(transitionConfig, transition, payload, opt_callback) {
@@ -817,9 +831,6 @@ Jira.prototype.getUpdatePayload_ = function(opt_callback) {
         function(callback) {
             payload = {
                 fields: {
-                    assignee: {
-                        name: options.assignee
-                    },
                     components: [
                         {
                             id: component.id
@@ -853,6 +864,12 @@ Jira.prototype.getUpdatePayload_ = function(opt_callback) {
             if (options.reporter && (!options.new || options.reporter !== jiraConfig.user)) {
                 payload.fields.reporter = {
                     name: options.reporter
+                };
+            }
+
+            if (options.assignee !== undefined) {
+                payload.assignee = {
+                    name: options.assignee
                 };
             }
 
@@ -1018,6 +1035,11 @@ Jira.prototype.login_ = function(opt_callback) {
 
     inquirer.prompt(
         [
+            {
+                type: 'input',
+                message: 'Enter your JIRA server',
+                name: 'host'
+            },
             {
                 type: 'input',
                 message: 'Enter your JIRA user',
