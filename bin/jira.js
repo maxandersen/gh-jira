@@ -47,6 +47,8 @@ Jira.DETAILS = {
         'assign': Boolean,
         'assignee': String,
         'unassign': Boolean,
+        'unassigned': Boolean,
+        'default-assignee': Boolean,
         'browser': Boolean,
         'comment': String,
         'component': String,
@@ -303,6 +305,9 @@ Jira.prototype.run = function() {
             options.unassigned = true;
         }
 
+        if (options['default-assignee']) {
+            delete options.assignee;
+        }
 
         if (options.unassigned) {
             options.assignee = null;
